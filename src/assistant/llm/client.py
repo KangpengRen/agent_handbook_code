@@ -14,22 +14,29 @@ class DeepSeekClient:
     def __init__(self):
         self.api_key = os.getenv("DEEPSEEK_API_KEY")
         self.api_url = os.getenv("DEEPSEEK_API_URL")
+        self.reason_model = os.getenv("DEEPSEEK_REASON_MODEL")
         self.model = os.getenv("DEEPSEEK_MODEL")
 
-    def call(self, messages: list, tools: dict) -> dict:
+    def call(self, messages: list, tools: dict, reasoning_effort: str = None) -> dict:
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
 
         payload = {
-            "model": self.model,
             "messages": messages,
             "tools": tools,
             "stream": False,
             "temperature": 0.7,
             "max_tokens": 1024
         }
+
+
+        # 【非对称思考预算】Planner 用推理模型，Executor 用快速模型
+        if reasoning_effort == "high":
+            payload["model"] = self.reason_model
+        else:
+            payload["model"] = self.model
 
         for attempt in range(3):
             try:

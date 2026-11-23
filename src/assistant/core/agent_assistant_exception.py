@@ -10,6 +10,11 @@ class AgentLoopException(Exception):
     """Agent循环执行异常"""
     pass
 
+class AgentPlanException(Exception):
+    """Agent规划"""
+    pass
+
+
 class LLMRetryException(Exception):
     """LLM请求失败【重试】异常"""
     pass

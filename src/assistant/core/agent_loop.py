@@ -63,20 +63,17 @@ class AgentLoop:
             # 大模型回复
             text = message.get("content", "").strip()
             if text:
-                self._emit(event="done", turn=state.turn, text=text)
-
-                if choice.get("finish_reason") == "length":
-                    self._emit("aborted", state.turn, reason="max_tokens阶段，正在请求精简重试")
-
-                    messages.pop()
-                    messages.append({
-                        "role": "user",
-                        "content": "你刚才的输出触发了最大长度限制被硬截断了。"
-                                   "请精简你的回答，或者分多次调用工具。如果你是准备调用工具，请确保参数不要过长。"
-                    })
-                    continue
-
                 self._emit(event="llm_text", turn=state.turn, text=text)
+
+            if choice.get("finish_reason") == "length":
+                self._emit("aborted", state.turn, reason="max_tokens阶段，正在请求精简重试")
+                messages.pop()
+                messages.append({
+                    "role": "user",
+                    "content": "你刚才的输出触发了最大长度限制被硬截断了。"
+                               "请精简你的回答，或者分多次调用工具。如果你是准备调用工具，请确保参数不要过长。"
+                })
+                continue
 
             # 判断是否到达结束条件
             if choice["finish_reason"] != "tool_calls":
