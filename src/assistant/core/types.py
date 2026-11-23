@@ -22,7 +22,6 @@ class AgentEvent:
 
 @dataclass
 class AgentLoopOptions:
-    max_turns: int
     system_prompt: str
     tools: list[Tool]
     on_event: Optional[Callable[[AgentEvent], None]] = None

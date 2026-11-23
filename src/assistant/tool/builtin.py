@@ -20,7 +20,8 @@ class ListFilesTool(Tool):
     def execute(self, inp: dict[str, Any]) -> str:
         """读取指定目录下的文件，默认为当前目录"""
         inp = inp or {}
-        return "\n".join(sorted(p.name for p in Path(inp.get("dir", ".")).iterdir()))
+        target_dir = inp.get("path") or "."
+        return "\n".join(sorted(p.name for p in Path(target_dir).iterdir()))
 
 
 class ReadFileTool(Tool):

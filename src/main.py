@@ -1,5 +1,7 @@
 import json
+from pathlib import Path
 
+from src.assistant.core.budget import MaxTurn, TokenBudget, CostBudget, WallBudget
 from src.assistant.core.agent_loop import AgentLoop
 from src.assistant.core.types import AgentEvent, AgentLoopOptions
 from src.assistant.tool.builtin import ListFilesTool, ReadFileTool, WriteFileTool
@@ -7,6 +9,7 @@ from src.assistant.tool.builtin import ListFilesTool, ReadFileTool, WriteFileToo
 SYSTEM_PROMPT = """你是示例助手，一个企业内部任务执行Agent。
 工作方式：先思考需要哪些信息，再调用工具获取，信息足够后完成任务，直接给出最终答复。
 约束：只操作当前工作目录；文件不存在或读取失败时如实报告，绝不编造内容。"""
+
 
 def custom_logger(e: AgentEvent):
     if e.type == "llm_start":
@@ -32,20 +35,26 @@ def custom_logger(e: AgentEvent):
     elif e.type == "done":
         print(f"\n✅ 第 {e.turn} 轮结束，任务完成。")
 
+    # 新增：处理外部校验失败的事件
+    elif e.type == "verification_failed":
+        print(f"⚠️ 外部校验未通过: {e.payload.get('error')}，正在要求模型修正...")
+
     elif e.type == "aborted":
         reason = e.payload.get("reason", "未知原因")
         print(f"\n🚨 任务被强制中止！(原因: {reason})，当前轮数: {e.turn}")
+
 
 def main():
     tools = [ListFilesTool(), ReadFileTool(), WriteFileTool()]
     opts = AgentLoopOptions(
         system_prompt=SYSTEM_PROMPT,
         tools=tools,
-        max_turns=10,
         on_event=custom_logger
     )
 
-    agent = AgentLoop(opts)
+    agent = AgentLoop(opts,
+                      stop_conditions=[MaxTurn(10), TokenBudget(500_000), CostBudget(5.0), WallBudget(1800)],
+                      verifier=lambda msgs: None if Path("summary.md").exists() else "summary.md 未生成，请继续")
     task = "请列出当前目录下的所有文件名，然后写一份200字以内的 summary.md 总结一下"
     final_answer = agent.run_agent(task)
     print("\n==== 最终答复 ====")
