@@ -78,7 +78,7 @@ class AgentLoop:
             # 判断是否到达结束条件
             if choice["finish_reason"] != "tool_calls":
                 # 通过方法严格校验是否完成任务
-                if self.verifier and (err := self.verifier(messages)):
+                if self.verifier and (err := self.verifier()):
                     self._emit(event="verification_failed", turn=state.turn, error=err)
                     messages.append({
                         "role": "user",
