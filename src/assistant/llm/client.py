@@ -4,7 +4,7 @@ import os
 import requests
 import time
 
-from src.assistant.core.agent_assistant_exception import LLMRequestException, LLMRetryException
+from assistant.core.agent_assistant_exception import LLMRequestException, LLMRetryException
 
 load_dotenv(override=True)
 

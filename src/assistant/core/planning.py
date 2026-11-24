@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from typing import Literal
 
 from assistant.core.budget import LoopState, check_loop_stop
-from src.assistant.core.agent_assistant_exception import AgentPlanException, BudgetExhaustedException, \
+from assistant.core.agent_assistant_exception import AgentPlanException, BudgetExhaustedException, \
     AgentLoopException
-from src.assistant.llm.client import DeepSeekClient
+from assistant.llm.client import DeepSeekClient
 
 
 @dataclass

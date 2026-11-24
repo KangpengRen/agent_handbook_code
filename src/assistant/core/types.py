@@ -16,7 +16,7 @@ class Tool(Protocol):
 
 @dataclass
 class AgentEvent:
-    type: Literal["llm_start", "llm_text", "tool_call", "tool_result", "done", "aborted"]
+    type: Literal["llm_start", "llm_text", "tool_call", "tool_result", "done", "aborted", "verification_failed"]
     turn: int
     payload: dict[str, Any] = field(default_factory=dict)
 

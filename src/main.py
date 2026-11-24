@@ -2,12 +2,12 @@ from pathlib import Path
 import json
 
 from assistant.core.budget import SessionMaxTurn
-from src.assistant.core.planning import PlanThenExecute
-from src.assistant.core.budget import MaxTurn, TokenBudget, CostBudget, WallBudget
-from src.assistant.core.agent_loop import AgentLoop
-from src.assistant.core.types import AgentEvent, AgentLoopOptions
-from src.assistant.tool.builtin import ListFilesTool, ReadFileTool, WriteFileTool
-from src.assistant.llm.client import DeepSeekClient
+from assistant.core.planning import PlanThenExecute
+from assistant.core.budget import MaxTurn, TokenBudget, CostBudget, WallBudget
+from assistant.core.agent_loop import AgentLoop
+from assistant.core.types import AgentEvent, AgentLoopOptions
+from assistant.tool.builtin import ListFilesTool, ReadFileTool, WriteFileTool
+from assistant.llm.client import DeepSeekClient
 
 EXECUTOR_PROMPT = """你是底层执行器，负责完成大计划中的某个特定小步骤。
 工作方式：根据步骤目标和完成判据，调用工具完成任务。
