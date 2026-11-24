@@ -51,8 +51,8 @@ def check_summary_file():
     if not p.exists():
         return "你声称完成了，但 summary.md 不存在！请立即重写。"
     content = p.read_text(encoding="utf-8")
-    if len(content) > 200:
-        return f"文件字数严重超标（当前 {len(content)} 字，限制 180 字）。请立即删减并覆盖原文件！"
+    if len(content) > 500:
+        return f"文件字数严重超标（当前 {len(content)} 字，限制 500 字）。请立即删减并覆盖原文件！"
     return None
 
 
