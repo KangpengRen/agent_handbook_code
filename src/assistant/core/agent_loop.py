@@ -4,8 +4,8 @@ Agent循环
 from typing import Any
 import json
 
-from .agent_assistant_exception import ToolException, AgentLoopException
-from .budget import AgentState, StopCondition
+from .agent_assistant_exception import ToolException, BudgetExhaustedException, AgentLoopException
+from .budget import AgentState, AgentStopCondition, LoopState, LoopStopCondition, check_loop_stop, check_agent_stop
 from .types import AgentLoopOptions, AgentEvent
 from ..llm.client import DeepSeekClient
 from ..tool.registry import build_tool_registry, tools_to_wire
@@ -14,9 +14,13 @@ from ..tool.registry import build_tool_registry, tools_to_wire
 class AgentLoop:
     """Agent循环类"""
 
-    def __init__(self, opts: AgentLoopOptions, stop_conditions: list[StopCondition], verifier=None):
+    def __init__(self, opts: AgentLoopOptions,
+                 agent_stop_conditions: list[AgentStopCondition],
+                 loop_stop_conditions: list[LoopStopCondition],
+                 verifier=None):
         self.opts = opts
-        self.stop_conditions = stop_conditions
+        self.agent_stop_conditions = agent_stop_conditions
+        self.loop_stop_conditions = loop_stop_conditions
         self.llm = DeepSeekClient()
         self.tool_by_name = build_tool_registry(opts.tools)
         self.tools = tools_to_wire(opts.tools)
@@ -26,33 +30,39 @@ class AgentLoop:
         if self.opts.on_event:
             self.opts.on_event(AgentEvent(type=event, turn=turn, payload=payload))
 
-    def run_agent(self, task: str) -> str:
+    def run_agent(self, task: str, loop_state: LoopState) -> str:
         """Agent循环"""
         messages = [
             {"role": "system", "content": self.opts.system_prompt},
             {"role": "user", "content": task}
         ]
 
-        state = AgentState()  # 初始化Agent状态
+        agent_state = AgentState()  # 初始化Agent状态
 
         while True:
-            state.turn += 1
+            agent_state.turn += 1
+            loop_state.session_turn += 1
 
-            for cond in self.stop_conditions:
-                d = cond.check(state=state)
-                if d.should_stop:
-                    self._emit(event="aborted", turn=state.turn, reason=d.reason)
-                    return self._finalize(messages=messages, reason=d.reason, state=state)
+            d = check_loop_stop(loop_state, self.loop_stop_conditions)
+            if d.should_stop:
+                self._emit(event="aborted", turn=agent_state.turn, reason=d.reason)
+                summary = self._finalize(messages=messages, reason=d.reason, loop_state=loop_state)
+                raise BudgetExhaustedException(f"{d.reason}\n{summary}")
 
+            d = check_agent_stop(agent_state, self.agent_stop_conditions)
+            if d.should_stop:
+                self._emit(event="aborted", turn=agent_state.turn, reason=d.reason)
+                summary = self._finalize(messages=messages, reason=d.reason, loop_state=loop_state)
+                raise AgentLoopException(f"{d.reason}\n{summary}")
 
-            self._emit("llm_start", state.turn)
+            self._emit("llm_start", agent_state.turn)
 
             try:
                 reply = self.llm.call(messages=messages, tools=self.tools)
             except Exception as e:
-                self._emit(event="aborted", turn=state.turn, reason=f"大模型服务调用异常：{e}")
-                return f"❌ 系统提示：大模型服务连接失败，Agent已安全停止。原因：{e}"
-            state.record_usage(reply.get("usage", {}))
+                self._emit(event="aborted", turn=agent_state.turn, reason=f"大模型服务调用异常：{e}")
+                raise AgentLoopException(f"大模型服务连接失败：{e}")
+            loop_state.record_usage(reply.get("usage", {}))
 
             choice = reply["choices"][0]
             message = choice["message"]
@@ -63,10 +73,10 @@ class AgentLoop:
             # 大模型回复
             text = message.get("content", "").strip()
             if text:
-                self._emit(event="llm_text", turn=state.turn, text=text)
+                self._emit(event="llm_text", turn=agent_state.turn, text=text)
 
             if choice.get("finish_reason") == "length":
-                self._emit("aborted", state.turn, reason="max_tokens阶段，正在请求精简重试")
+                self._emit("aborted", agent_state.turn, reason="max_tokens阶段，正在请求精简重试")
                 messages.pop()
                 messages.append({
                     "role": "user",
@@ -79,14 +89,14 @@ class AgentLoop:
             if choice["finish_reason"] != "tool_calls":
                 # 通过方法严格校验是否完成任务
                 if self.verifier and (err := self.verifier()):
-                    self._emit(event="verification_failed", turn=state.turn, error=err)
+                    self._emit(event="verification_failed", turn=agent_state.turn, error=err)
                     messages.append({
                         "role": "user",
                         "content": f"任务未通过外部校验：{err}，请根据要求重新修改"
                     })
                     continue
 
-                self._emit(event="done", turn=state.turn, text=text)
+                self._emit(event="done", turn=agent_state.turn, text=text)
                 return text
 
             # 执行工具调用
@@ -95,7 +105,7 @@ class AgentLoop:
                 args = json.loads(tool_call["function"]["arguments"])
 
                 try:
-                    self._emit(event="tool_call", turn=state.turn, name=name, args=args)
+                    self._emit(event="tool_call", turn=agent_state.turn, name=name, args=args)
                     if not (tool := self.tool_by_name.get(name, None)):
                         raise ToolException(f"工具[{name}]未找到")
                     tool_result = tool.execute(args)
@@ -104,11 +114,11 @@ class AgentLoop:
                     tool_result = f"工具调用失败：{e}"
                     is_error = True
 
-                self._emit(event="tool_result", turn=state.turn, tool_result=tool_result, is_error=is_error)
+                self._emit(event="tool_result", turn=agent_state.turn, tool_result=tool_result, is_error=is_error)
                 # 将工具调用结果加入到消息列表中
                 messages.append({"role": "tool", "tool_call_id": tool_call["id"], "content": tool_result})
 
-    def _finalize(self, messages: list[dict[str, Any]], reason: str, state: AgentState) -> str:
+    def _finalize(self, messages: list[dict[str, Any]], reason: str, loop_state: LoopState) -> str:
         """收尾轮：禁用工具的最后一次调用，把残局翻译成可交接的总结"""
         messages.append({
             "role": "user",
@@ -116,8 +126,10 @@ class AgentLoop:
                        f"总结：已完成事项、未完成事项、下一步建议"
         })
         # 禁用工具，强制总结
-        reply = self.llm.call(messages, tools=[])
-        state.record_usage(reply.get("usage", {}))
-        choice = reply["choices"][0]
-        message = choice["message"]
-        return f"任务因 {reason} 终止\n" + message.get("content", "")
+        try:
+            reply = self.llm.call(messages, tools=[])
+            loop_state.record_usage(reply.get("usage", {}))
+            summary = reply["choices"][0]["message"].get("content", "")
+        except Exception as e:
+            summary = f"（收尾总结生成失败：{e}）"
+        return f"任务因 {reason} 终止\n{summary}"

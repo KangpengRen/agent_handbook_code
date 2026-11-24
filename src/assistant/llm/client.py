@@ -28,7 +28,7 @@ class DeepSeekClient:
             "tools": tools,
             "stream": False,
             "temperature": 0.7,
-            "max_tokens": 1024
+            "max_tokens": 4096
         }
 
 
@@ -47,7 +47,7 @@ class DeepSeekClient:
                     return reply.json()
 
                 # 如果是 429 限流 或 5xx 服务端错误，进行指数退避重试
-                if reply.status_code == 429 or reply.status_code >= 500:
+                if reply.status_code == 429 or reply.status_code >= 00:
                     raise LLMRetryException(f"可重试的 API 错误 {reply.status_code}: {reply.text}")
 
                 # 其他客户端错误（如 401 鉴权失败、400 参数错误），重试也没用，直接抛出
