@@ -90,7 +90,7 @@ def main():
         max_replans=2
     )
 
-    task = "请先列出当前目录下的所有文件名，然后读取 README.md，最后写一份 200 字以内的 summary.md"
+    task = "请根据这个项目的结构、内容，最后写一份 500 字以内的 summary.md"
 
     print(f"\n ==== 启动 Plan-then-Execute ====")
     final_report = p2e_agent.run(task)
