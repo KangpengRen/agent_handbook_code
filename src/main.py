@@ -1,12 +1,13 @@
 from pathlib import Path
 import json
 
-from src.assistant.core.planning import PlanThenExecute
-from src.assistant.core.budget import MaxTurn, TokenBudget, CostBudget, WallBudget
-from src.assistant.core.agent_loop import AgentLoop
-from src.assistant.core.types import AgentEvent, AgentLoopOptions
-from src.assistant.tool.builtin import ListFilesTool, ReadFileTool, WriteFileTool
-from src.assistant.llm.client import DeepSeekClient
+from assistant.core.budget import SessionMaxTurn
+from assistant.core.planning import PlanThenExecute
+from assistant.core.budget import MaxTurn, TokenBudget, CostBudget, WallBudget
+from assistant.core.agent_loop import AgentLoop
+from assistant.core.types import AgentEvent, AgentLoopOptions
+from assistant.tool.builtin import ListFilesTool, ReadFileTool, WriteFileTool
+from assistant.llm.client import DeepSeekClient
 
 EXECUTOR_PROMPT = """你是底层执行器，负责完成大计划中的某个特定小步骤。
 工作方式：根据步骤目标和完成判据，调用工具完成任务。
@@ -51,8 +52,8 @@ def check_summary_file():
     if not p.exists():
         return "你声称完成了，但 summary.md 不存在！请立即重写。"
     content = p.read_text(encoding="utf-8")
-    if len(content) > 500:
-        return f"文件字数严重超标（当前 {len(content)} 字，限制 500 字）。请立即删减并覆盖原文件！"
+    if len(content) > 1000:
+        return f"文件字数严重超标（当前 {len(content)} 字，限制 900 字）。请立即删减并覆盖原文件！"
     return None
 
 
@@ -71,10 +72,13 @@ def make_executor(step) -> AgentLoop:
 
     return AgentLoop(
         opts,
-        stop_conditions=[
+        agent_stop_conditions=[
             MaxTurn(12),
-            TokenBudget(50_000),
-            WallBudget(120),
+        ],
+        loop_stop_conditions=[
+            SessionMaxTurn(100),
+            TokenBudget(500_000),
+            WallBudget(300),
             CostBudget(5.0)
         ],
         verifier=verifier
@@ -90,7 +94,7 @@ def main():
         max_replans=2
     )
 
-    task = "请根据这个项目的结构、内容，最后写一份 500 字以内的 summary.md"
+    task = "请根据这个项目的结构、内容，最后写一份 1000 字以内的 summary.md"
 
     print(f"\n ==== 启动 Plan-then-Execute ====")
     final_report = p2e_agent.run(task)

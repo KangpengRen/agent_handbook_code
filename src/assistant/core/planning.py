@@ -5,8 +5,10 @@ import json
 from dataclasses import dataclass
 from typing import Literal
 
-from src.assistant.core.agent_assistant_exception import AgentPlanException
-from src.assistant.llm.client import DeepSeekClient
+from assistant.core.budget import LoopState, check_loop_stop
+from assistant.core.agent_assistant_exception import AgentPlanException, BudgetExhaustedException, \
+    AgentLoopException
+from assistant.llm.client import DeepSeekClient
 
 
 @dataclass
@@ -43,6 +45,7 @@ PLAN_TOOL = {
     }
 }
 
+
 class PlanThenExecute:
     """一次显示规划 + 逐步执行 + 增量重规划"""
 
@@ -50,12 +53,13 @@ class PlanThenExecute:
         self.llm, self.make_executor = llm, make_executor
         self.max_replans = max_replans
 
-    def plan(self, task: str, context: str = "") -> list[Step]:
+    def plan(self, task: str, loop_state: LoopState, context: str = "") -> list[Step]:
         reply = self.llm.call(messages=[{"role": "user", "content": f"任务：{task}\n{context}\n请规划执行步骤"}],
                               tools=[PLAN_TOOL],
                               reasoning_effort="high")
 
         message = reply["choices"][0]["message"]
+        loop_state.record_usage(reply.get("usage", {}))
 
         if not (tool_calls := message.get("tool_calls", "")):
             raise AgentPlanException("Planner 未返回结构化计划")
@@ -63,8 +67,10 @@ class PlanThenExecute:
         return [Step(i, s["goal"], s["done_when"]) for i, s in enumerate(steps_data, 1)]
 
     def run(self, task: str) -> str:
+        loop_state = LoopState()
+
         print(f"\n[Planner] 正在拆解任务: {task}")
-        steps = self.plan(task)
+        steps = self.plan(task=task, loop_state=loop_state)
         for s in steps:
             print(f"  -> 步骤 {s.id}: {s.goal} (完成判据: {s.done_when})")
 
@@ -80,11 +86,21 @@ class PlanThenExecute:
             try:
                 # 执行器只看到"已完成结论 + 当前步骤"
                 step.result = executor.run_agent(
-                    f"已完成进展：\n{done_ctx or '（无）'}\n\n"
-                    f"当前步骤：{step.goal}\n完成判据：{step.done_when}"
-                )
+                    task=f"已完成进展：\n{done_ctx or '（无）'}\n\n"
+                         f"当前步骤：{step.goal}\n完成判据：{step.done_when}",
+                    loop_state=loop_state)
                 step.status = "done"
                 print(f"✅ 步骤 {step.id} 完成")
+            except BudgetExhaustedException as e:
+                step.status = "failed"
+                step.result = str(e)
+                print(f"🚨 步骤 {step.id} 全局预算耗尽: {e}")
+                return self._abort_summary(steps)  # ← 运行时已裁决，planning 立即终止
+            except AgentLoopException as e:
+                step.status = "failed"
+                step.result = str(e)
+                print(f"❌ 步骤 {step.id} 轮数耗尽: {e}")
+                # 落到下面 failed → replan 逻辑（MaxTurn 可以靠重规划拆细步骤）
             except Exception as e:
                 step.status = "failed"
                 step.result = str(e)
@@ -98,19 +114,19 @@ class PlanThenExecute:
 
                 replans += 1
                 print(f"\n[Replanner] 触发增量重规划 (第 {replans} 次)...")
-                steps = self._replan(task, steps)
+                steps = self._replan(task=task, loop_state=loop_state, steps=steps)
                 for s in steps:
                     if s.status != "done":
                         print(f"  -> 新步骤 {s.id}: {s.goal}")
 
         return "\n\n".join(f"## 步骤 {s.id}: {s.goal}\n{s.result}" for s in steps if s.status == "done")
 
-    def _replan(self, task: str, steps: list[Step]) -> list[Step]:
+    def _replan(self, task: str, loop_state: LoopState, steps: list[Step]) -> list[Step]:
         """增量重规划：done步骤保留为资产，只重排剩余工作"""
         done = [s for s in steps if s.status == "done"]
         report = "\n".join(f"[{s.status}] {s.goal}: {s.result[:200]}" for s in steps)
         fresh = self.plan(task, context=f"既有进展与失败记录：\n{report}\n"
-                                        f"只规划剩余步骤，不要重复已完成步骤。")
+                                        f"只规划剩余步骤，不要重复已完成步骤。", loop_state=loop_state)
 
         return done + [Step(len(done) + i, s.goal, s.done_when) for i, s in enumerate(fresh, 1)]
 

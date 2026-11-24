@@ -14,6 +14,9 @@ class AgentPlanException(Exception):
     """Agent规划"""
     pass
 
+class BudgetExhaustedException(Exception):
+    """预算耗尽"""
+    pass
 
 class LLMRetryException(Exception):
     """LLM请求失败【重试】异常"""
